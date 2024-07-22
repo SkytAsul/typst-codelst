@@ -18,30 +18,69 @@
   let gobble = 9223372036854775807
   let _c = none
   for line in code-lines {
-    if line.trim().len() == 0 { continue }
-    if not line.at(0) in (" ", "\t") {
+    let line-text = line.at("text")
+    if line-text.trim().len() == 0 { continue }
+    if not line-text.at(0) in (" ", "\t") {
       return 0
     } else {
-      if _c == none { _c = line.at(0) }
-      gobble = calc.min(gobble, codelst-count-blanks(line, char:_c))
+      if _c == none { _c = line-text.at(0) }
+      gobble = calc.min(gobble, codelst-count-blanks(line-text, char:_c))
     }
   }
   return gobble
 }
 
+// Removes whitespace from the start of the content. Returns 0 or the amount of spaces gobbled, if inferior to gobble.
+#let codelst-gobble-content( code, gobble ) = {
+  if gobble <= 0 { return (code, 0) }
+
+  if not code.has("text") {
+    if code.has("child") {
+      let (gobbled-child, gobbled) = codelst-gobble-content( code.at("child"), gobble)
+      return (gobbled-child, gobbled)
+    }
+  }
+
+  let code-text = code.at("text")
+  if code-text.len() > 0 {
+    let t = code.fields()
+    let line-body = if code.has("body") {code.at("body")} else {none}
+    if line-body == none or line-body.fields().keys() == ("text",){
+      // easy case: the line isn't formatted
+      gobble = calc.min(code-text.len(), gobble)
+      code = [#code-text.slice(gobble)]
+    } else {
+      let children
+      if line-body.has("children") {
+        children = line-body.at("children")
+      } else if line-body.has("child") {
+        children = (line-body.at("child"),)
+      }
+      code = none
+      for child in children {
+        let (gobbled-child, gobbled) = codelst-gobble-content(child, gobble)
+        code += gobbled-child
+        gobble -= gobbled
+      }
+      if line-body.has("styles") {
+        let func = line-body.func()
+        code = func(code, line-body.at("styles"))
+      }
+    }
+  }
+  return (code, gobble)
+}
+
 // Removes whitespace from the start of each line.
 #let codelst-gobble-blanks( code-lines, gobble ) = {
+  if gobble == false { return code-lines }
+
   if gobble == auto {
     gobble = codelst-gobble-count(code-lines)
   }
 
   // Convert tabs to spaces and remove unnecessary whitespace
-  return code-lines.map((line) => {
-    if line.len() > 0 {
-      line = line.slice(gobble)
-    }
-    line
-  })
+  return code-lines.map((line) => codelst-gobble-content(line, gobble).at(0))
 }
 
 // Alias for the numbering function
@@ -207,6 +246,9 @@
     }
     let line-count = code-lines.len()
 
+    ///// Gobble whitespace from the start of lines
+    code-lines = codelst-gobble-blanks(code-lines, gobble)
+
     // Numbering function
     let next-lno() = {
       codelst-counter.step()
@@ -284,8 +326,6 @@
   //// Prepare code text
   code-lines = code.text.split("\n")
 
-  ///// Gobble whitespace from the start of lines
-  code-lines = codelst-gobble-blanks(code-lines, gobble)
   ///// Remove labels
   code-lines = code-lines.map((line) => line.replace(label-regex, ""))
 
